@@ -87,29 +87,13 @@
                 <i class="bi bi-box-seam"></i>
                 Quantité totale: <strong>{{ getQuantiteAutorisee(selectedClient.id) }} kg</strong>
               </span>
-              <!-- Per-code autorisation breakdown (styled) -->
-              <div *ngIf="getClientAutorisations(selectedClient.id).length > 0" class="autorisation-section">
-                <div class="autorisation-title">Codes d'autorisation par quantité :</div>
-                <div class="autorisation-list">
-                  <div *ngFor="let a of getClientAutorisations(selectedClient.id)" class="autorisation-item">
-                    <div class="code-block">{{ a.code }}</div>
-                    <div class="stats-block">
-                      <div class="stat">
-                        <div class="stat-label"> Quantité autorisée</div>
-                        <div class="stat-value">{{ a.quantite || 0 }} kg</div>
-                      </div>
-                      <div class="stat">
-                        <div class="stat-label">Vendu</div>
-                        <div class="stat-value sold">{{ getTotalLivreClientForCode(selectedClient.id, a.code)  }} kg</div>
-                      </div>
-                      <div class="stat">
-                        <div class="stat-label">Reste</div>
-                        <div class="stat-value" [ngClass]="getResteClientForCode(selectedClient.id, a.code) >= 0 ? 'positive' : 'negative'">
-                          {{ getResteClientForCode(selectedClient.id, a.code)  }} kg
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+              <!-- Affichage simplifié par code -->
+              <div *ngIf="getClientAutorisations(selectedClient.id).length > 0" style="margin-top: 8px;">
+                <div *ngFor="let a of getClientAutorisations(selectedClient.id)" style="font-size:15px; margin-bottom:2px;">
+                  <span style="font-weight:600; color: #000;;">code {{ a.code }}</span>
+                  : {{ a.quantite || 0 }} kg
+                  <span style="margin-left:12px; color:#000000;">reste :</span>
+                  <span [style.color]="getResteClientForCode(selectedClient.id, a.code) < 0 ? '#FFFFF' : '#FFFFF'" style="font-weight:600;">{{ getResteClientForCode(selectedClient.id, a.code) }} kg</span>
                 </div>
               </div>
               <span *ngIf="isClientEnDepassement()" class="meta-item" style="color: #dc2626; font-weight: 700;">

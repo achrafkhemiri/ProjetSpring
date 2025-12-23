@@ -222,11 +222,26 @@ export class RecapComponent {
     const projetId = this.contextProjetId || this.projetActifId;
 
     if (!projetId) {
-      this.projetsClients = [];
+      // Pas de projet actif : charger toutes les associations projet-client pour tous les projets
+      const allProjetClientsUrl = `${this.basePath}/api/projet-client`;
+      this.http.get<any[]>(allProjetClientsUrl, { withCredentials: true, responseType: 'json' as 'json' }).subscribe({
+        next: (projetClients) => {
+          if (!Array.isArray(projetClients) || projetClients.length === 0) {
+            this.projetsClients = [];
+            return;
+          }
+          this.projetsClients = projetClients;
+          console.log('[DEBUG] Toutes les associations projet-client chargées:', this.projetsClients);
+        },
+        error: (err) => {
+          console.error('Erreur chargement projet-clients (all):', err);
+          this.projetsClients = [];
+        }
+      });
       return;
     }
 
-    // Try to load projet-client associations which may contain 'autorisation' arrays per client
+    // Cas projet actif : inchangé
     const projetClientsUrl = `${this.basePath}/api/projet-client/projet/${projetId}`;
     this.http.get<any[]>(projetClientsUrl, { withCredentials: true, responseType: 'json' as 'json' }).subscribe({
       next: (projetClients) => {
@@ -323,6 +338,10 @@ export class RecapComponent {
     if (clientData.quantiteAutorisee !== undefined) {
       console.log('Quantité totale autorisée globale:', clientData.quantiteAutorisee);
     }
+
+    // Afficher les autorisations du client sélectionné
+    const autorisations = this.getClientAutorisations(client.id);
+    console.log('Autorisations du client sélectionné:', autorisations);
     
     this.loadVoyagesForClient();
     // Populate available autorisation codes for the selected client
@@ -564,19 +583,31 @@ export class RecapComponent {
     
     const projetId = this.contextProjetId || this.projetActifId;
     
+    // console.log(`Quantité totale autorisée pour client ${clientId} depuis selectedClient:`);
     // Essayer d'abord de récupérer depuis selectedClient
     if (this.selectedClient && this.selectedClient.id === clientId) {
       const client = this.selectedClient as any;
       if (client.quantitesAutoriseesParProjet && projetId) {
         const quantite = client.quantitesAutoriseesParProjet[projetId];
         if (quantite !== undefined) {
-          console.log(`Quantité totale autorisée pour client ${clientId} depuis selectedClient:`, quantite);
+          // console.log(`Quantité totale autorisée pour client ${clientId} depuis selectedClient:`, quantite);
           return quantite;
         }
       }
       if (client.quantiteAutorisee !== undefined) {
-        console.log(`Quantité totale autorisée pour client ${clientId} depuis selectedClient.quantiteAutorisee:`, client.quantiteAutorisee);
+        // console.log(`Quantité totale autorisée pour client ${clientId} depuis selectedClient.quantiteAutorisee:`, client.quantiteAutorisee);
         return client.quantiteAutorisee;
+      }
+      // If client has per-project map but no current projetId, sum all values
+      if (client.quantitesAutoriseesParProjet && !projetId) {
+        try {
+          const map = client.quantitesAutoriseesParProjet as { [key: string]: number };
+          const sum = Object.keys(map).reduce((s, k) => s + (Number(map[k]) || 0), 0);
+          if (sum > 0) {
+            // console.log(`Quantité totale autorisée pour client ${clientId} (somme de quantitesAutoriseesParProjet):`, sum);
+            return sum;
+          }
+        } catch (e) { /* ignore */ }
       }
     }
     
@@ -597,10 +628,40 @@ export class RecapComponent {
     }
     
     // Enfin depuis projetsClients
-    const projetClient = this.projetsClients.find(pc => pc.clientId === clientId);
-    if (projetClient && projetClient.quantiteAutorisee !== undefined) {
-      console.log(`Quantité autorisée pour client ${clientId} depuis projetsClients:`, projetClient.quantiteAutorisee);
-      return projetClient.quantiteAutorisee;
+    const pcs = this.projetsClients.filter(pc => pc.clientId === clientId) as any[];
+    if (pcs && pcs.length > 0) {
+      // If projetId specified, prefer that entry
+      if (projetId) {
+        const pcForProjet = pcs.find(p => p.projetId === projetId);
+        if (pcForProjet) {
+          if (pcForProjet.quantiteAutorisee !== undefined) {
+            console.log(`Quantité autorisée pour client ${clientId} depuis projetsClients (projet ${projetId}):`, pcForProjet.quantiteAutorisee);
+            return pcForProjet.quantiteAutorisee;
+          }
+          const auths = pcForProjet.autorisation || pcForProjet.autorisations || [];
+          if (Array.isArray(auths) && auths.length > 0) {
+            const sum = auths.reduce((s: number, a: any) => s + (Number(a?.quantite) || 0), 0);
+            console.log(`Quantité autorisée (somme des autorisations) pour client ${clientId} depuis projetsClients (projet ${projetId}):`, sum);
+            return sum;
+          }
+        }
+      }
+
+      // No specific projetId — sum across all projetsClients entries
+      let totalFromQuantite = 0;
+      let totalFromAuths = 0;
+      for (const p of pcs) {
+        if (p.quantiteAutorisee !== undefined) totalFromQuantite += Number(p.quantiteAutorisee) || 0;
+        const auths = p.autorisation || p.autorisations || [];
+        if (Array.isArray(auths) && auths.length > 0) {
+          totalFromAuths += auths.reduce((s: number, a: any) => s + (Number(a?.quantite) || 0), 0);
+        }
+      }
+      const final = totalFromQuantite > 0 ? totalFromQuantite : totalFromAuths;
+      if (final > 0) {
+        console.log(`Quantité autorisée pour client ${clientId} depuis projetsClients (somme tous projets):`, final);
+        return final;
+      }
     }
     
     console.log(`Aucune quantité autorisée trouvée pour client ${clientId}`);
@@ -611,15 +672,47 @@ export class RecapComponent {
   getClientAutorisations(clientId?: number): any[] {
     if (!clientId) return [];
     const projetId = this.contextProjetId || this.projetActifId;
-    if (!projetId) return [];
-    // Prefer enriched client object
+
+    // 1. Chercher dans l'objet client enrichi (cas API enrichie)
     const client = this.clients.find(c => c.id === clientId) as any;
-    if (client && client.autorisation && Array.isArray(client.autorisation)) {
+    if (client && Array.isArray(client.autorisation) && client.autorisation.length > 0) {
+      console.log('[DEBUG] Autorisations trouvées dans client:', client.autorisation);
       return client.autorisation;
     }
-    // Fallback to projetsClients entry
-    const pc = this.projetsClients.find(p => p.projetId === projetId && p.clientId === clientId) as any;
-    if (pc && pc.autorisation && Array.isArray(pc.autorisation)) return pc.autorisation;
+
+    // 2. Chercher dans projetsClients pour ce projet
+    if (projetId) {
+      const pc = this.projetsClients.find(p => p.projetId === projetId && p.clientId === clientId) as any;
+      if (pc && Array.isArray(pc.autorisation) && pc.autorisation.length > 0) {
+        console.log('[DEBUG] Autorisations trouvées dans projetsClients pour projet:', pc.autorisation);
+        return pc.autorisation;
+      }
+    }
+
+    // 3. Fusionner toutes les autorisations de tous les projets pour ce client
+    const pcs = this.projetsClients.filter(p => p.clientId === clientId) as any[];
+    if (pcs && pcs.length > 0) {
+      const combined: { [code: string]: number } = {};
+      for (const p of pcs) {
+        const auths = p.autorisation || p.autorisations || [];
+        if (Array.isArray(auths)) {
+          for (const a of auths) {
+            if (!a || !a.code) continue;
+            if (combined[a.code]) {
+              combined[a.code] += Number(a.quantite) || 0;
+            } else {
+              combined[a.code] = Number(a.quantite) || 0;
+            }
+          }
+        }
+      }
+      const result = Object.entries(combined).map(([code, quantite]) => ({ code, quantite }));
+      console.log('[DEBUG] Autorisations fusionnées sur tous les projets:', result);
+      return result;
+    }
+
+    // 4. Rien trouvé
+    console.log('[DEBUG] Aucune autorisation trouvée pour client', clientId);
     return [];
   }
 

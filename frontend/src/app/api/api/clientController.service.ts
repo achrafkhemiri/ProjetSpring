@@ -1,3 +1,4 @@
+  
 /**
  * OpenAPI definition
  *
@@ -47,6 +48,7 @@ export class ClientControllerService extends BaseService {
         if (clientDTO === null || clientDTO === undefined) {
             throw new Error('Required parameter clientDTO was null or undefined when calling createClient.');
         }
+        
 
     let localVarHeaders = this.defaultHeaders;
 
@@ -90,6 +92,66 @@ export class ClientControllerService extends BaseService {
                 body: clientDTO,
                 responseType: <any>responseType_,
                 withCredentials: true,
+                headers: localVarHeaders,
+                observe: observe,
+                reportProgress: reportProgress
+            }
+        );
+    }
+      /**
+     * Get paginated, filtered, and searched clients from backend
+     * @param page Page number (0-based)
+     * @param size Page size
+     * @param search Search string (optional)
+     * @param filter Filter string (optional)
+     * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
+     * @param reportProgress flag to report request and response progress.
+     */
+    public getPagedClients(
+        page: number,
+        size: number,
+        search?: string,
+        filter?: string,
+        observe: any = 'body',
+        reportProgress: boolean = false,
+        options?: {httpHeaderAccept?: '*/*', context?: HttpContext, transferCache?: boolean}
+    ): Observable<any> {
+        let localVarHeaders = this.defaultHeaders;
+        const localVarHttpHeaderAcceptSelected: string | undefined = options?.httpHeaderAccept ?? this.configuration.selectHeaderAccept([
+            '*/*'
+        ]);
+        if (localVarHttpHeaderAcceptSelected !== undefined) {
+            localVarHeaders = localVarHeaders.set('Accept', localVarHttpHeaderAcceptSelected);
+        }
+
+        const localVarHttpContext: HttpContext = options?.context ?? new HttpContext();
+        const localVarTransferCache: boolean = options?.transferCache ?? true;
+
+        let responseType_: 'text' | 'json' | 'blob' = 'json';
+        if (localVarHttpHeaderAcceptSelected) {
+            if (localVarHttpHeaderAcceptSelected.startsWith('text')) {
+                responseType_ = 'text';
+            } else if (this.configuration.isJsonMime(localVarHttpHeaderAcceptSelected)) {
+                responseType_ = 'json';
+            } else {
+                responseType_ = 'blob';
+            }
+        }
+
+        let localVarPath = `/api/clients/paged`;
+        let params = new HttpParams({ encoder: new CustomHttpParameterCodec() })
+            .set('page', page.toString())
+            .set('size', size.toString());
+        if (search) params = params.set('search', search);
+        if (filter) params = params.set('filter', filter);
+
+        const { basePath, withCredentials } = this.configuration;
+        return this.httpClient.request<any>('get', `${basePath}${localVarPath}`,
+            {
+                params,
+                context: localVarHttpContext,
+                responseType: <any>responseType_,
+                ...(withCredentials ? { withCredentials } : {}),
                 headers: localVarHeaders,
                 observe: observe,
                 reportProgress: reportProgress

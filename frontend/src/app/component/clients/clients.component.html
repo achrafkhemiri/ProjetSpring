@@ -8,10 +8,10 @@
 				<div class="header-icon">
 					<i class="bi bi-people-fill"></i>
 				</div>
-				<div>
-					<h1 class="page-title">Tous les Clients</h1>
-					<p class="page-subtitle">{{ filteredClients.length }} client(s) trouvé(s)</p>
-				</div>
+				   <div>
+					   <h1 class="page-title">Tous les Clients</h1>
+					   <p class="page-subtitle">{{ totalElements }} client(s) trouvé(s)</p>
+				   </div>
 			</div>
 		</div>
 
@@ -27,8 +27,8 @@
 					(input)="filterClients()"
 				/>
 			</div>
-			<div class="toolbar-right">
-				<span class="results-count">{{ filteredClients.length }} résultat(s)</span>
+			   <div class="toolbar-right">
+				   <span class="results-count">{{ totalElements }} résultat(s)</span>
 				<div class="page-size-selector">
 					<span>Afficher</span>
 					<select [(ngModel)]="pageSize" (change)="onPageSizeChange()" class="page-size-select">
@@ -44,46 +44,26 @@
 			<table class="modern-table">
 				<thead>
 					<tr>
-						<th class="sortable" (click)="sortBy('nom')">
-							<div class="th-content">
-								<span>Nom</span>
-								<i class="bi" [ngClass]="{
-									'bi-chevron-down': sortColumn === 'nom' && sortDirection === 'desc',
-									'bi-chevron-up': sortColumn === 'nom' && sortDirection === 'asc',
-									'bi-chevron-expand': sortColumn !== 'nom'
-								}"></i>
-							</div>
-						</th>
-						<th class="sortable" (click)="sortBy('numero')">
-							<div class="th-content">
-								<span>Numéro</span>
-								<i class="bi" [ngClass]="{
-									'bi-chevron-down': sortColumn === 'numero' && sortDirection === 'desc',
-									'bi-chevron-up': sortColumn === 'numero' && sortDirection === 'asc',
-									'bi-chevron-expand': sortColumn !== 'numero'
-								}"></i>
-							</div>
-						</th>
-						<th class="sortable" (click)="sortBy('adresse')">
-							<div class="th-content">
-								<span>Adresse</span>
-								<i class="bi" [ngClass]="{
-									'bi-chevron-down': sortColumn === 'adresse' && sortDirection === 'desc',
-									'bi-chevron-up': sortColumn === 'adresse' && sortDirection === 'asc',
-									'bi-chevron-expand': sortColumn !== 'adresse'
-								}"></i>
-							</div>
-						</th>
-						<th class="sortable" (click)="sortBy('mf')">
-							<div class="th-content">
-								<span>Matricule Fiscal</span>
-								<i class="bi" [ngClass]="{
-									'bi-chevron-down': sortColumn === 'mf' && sortDirection === 'desc',
-									'bi-chevron-up': sortColumn === 'mf' && sortDirection === 'asc',
-									'bi-chevron-expand': sortColumn !== 'mf'
-								}"></i>
-							</div>
-						</th>
+						   <th>
+							   <div class="th-content">
+								   <span>Nom</span>
+							   </div>
+						   </th>
+						   <th>
+							   <div class="th-content">
+								   <span>Numéro</span>
+							   </div>
+						   </th>
+						   <th>
+							   <div class="th-content">
+								   <span>Adresse</span>
+							   </div>
+						   </th>
+						   <th>
+							   <div class="th-content">
+								   <span>Matricule Fiscal</span>
+							   </div>
+						   </th>
 					</tr>
 				</thead>
 				<tbody>
@@ -115,9 +95,9 @@
 		</div>
 
 		<!-- Pagination -->
-		<div class="pagination-container" *ngIf="filteredClients.length > 0">
-			<div class="pagination-info">
-				Affichage de {{ (currentPage - 1) * pageSize + 1 }} à {{ Math.min(currentPage * pageSize, filteredClients.length) }} sur {{ filteredClients.length }} client(s)
+		   <div class="pagination-container" *ngIf="totalElements > 0">
+			   <div class="pagination-info">
+				   Affichage de {{ (currentPage - 1) * pageSize + 1 }} à {{ Math.min(currentPage * pageSize, totalElements) }} sur {{ totalElements }} client(s)
 			</div>
 			<div class="pagination-controls">
 				<button class="page-btn" (click)="goToPage(1)" [disabled]="currentPage === 1">

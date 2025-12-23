@@ -1,4 +1,7 @@
+
 package com.example.navire.services;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import com.example.navire.dto.ClientDTO;
 import com.example.navire.exception.ClientNotFoundException;
@@ -15,6 +18,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class ClientService {
+        // searchClients is implemented in ClientServiceImpl
     @Autowired
     private ClientRepository clientRepository;
     @Autowired

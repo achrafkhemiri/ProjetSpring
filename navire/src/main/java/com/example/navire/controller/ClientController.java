@@ -1,6 +1,9 @@
+
 package com.example.navire.controller;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import com.example.navire.dto.ClientDTO;
-import com.example.navire.services.ClientService;
+import com.example.navire.services.ClientServiceInterface;
 import com.example.navire.exception.ClientNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -12,13 +15,21 @@ import java.util.List;
 @RequestMapping("/api/clients")
 public class ClientController {
     @Autowired
-    private ClientService clientService;
+    private ClientServiceInterface clientService;
 
     @GetMapping
     public List<ClientDTO> getAllClients() {
         return clientService.getAllClients();
     }
 
+    @GetMapping("/paged")
+    public Page<ClientDTO> getClientsPaged(
+        @RequestParam(value = "search", required = false, defaultValue = "") String search,
+        Pageable pageable
+    ) {
+        return clientService.searchClients(search != null ? search : "", pageable);
+    }
+    
     @GetMapping("/{id}")
     public ResponseEntity<ClientDTO> getClientById(@PathVariable Long id) {
         return ResponseEntity.ok(clientService.getClientById(id));
