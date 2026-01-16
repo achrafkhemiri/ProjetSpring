@@ -39,7 +39,7 @@
 				</div>
 				<div>
 					<h1 class="page-title">Gestion des Clients</h1>
-					<p class="page-subtitle">{{ filteredClients.length }} client(s) trouvé(s)</p>
+					<p class="page-subtitle">{{ totalElements }} client(s) trouvé(s)</p>
 				</div>
 			</div>
 			<div style="display: flex; gap: 12px;">
@@ -68,7 +68,7 @@
 					style="flex: 1; min-width: 150px;">
 					<i class="bi bi-list-ul"></i>
 					<span>Tous les clients</span>
-					<span class="filter-badge">{{ filteredClients.length }}</span>
+					<span class="filter-badge">{{ totalElements }}</span>
 				</button>
 				<button 
 					class="filter-btn" 
@@ -145,7 +145,7 @@
 				/>
 			</div>
 			<div class="toolbar-right">
-				<span class="results-count">{{ filteredClients.length }} résultat(s)</span>
+				<span class="results-count">{{ totalElements }} résultat(s)</span>
 				<div class="page-size-selector">
 					<label>Afficher</label>
 					<select [(ngModel)]="pageSize" (change)="onPageSizeChange()" class="page-size-select">
@@ -327,9 +327,9 @@
 		</div>
 
 		<!-- Pagination -->
-		<div class="pagination-container" *ngIf="filteredClients.length > 0">
+		<div class="pagination-container" *ngIf="totalElements > 0">
 			<div class="pagination-info">
-				Affichage de {{ (currentPage - 1) * pageSize + 1 }} à {{ Math.min(currentPage * pageSize, filteredClients.length) }} sur {{ filteredClients.length }} client(s)
+				Affichage de {{ (currentPage - 1) * pageSize + 1 }} à {{ Math.min(currentPage * pageSize, totalElements) }} sur {{ totalElements }} client(s)
 			</div>
 			<div class="pagination-controls">
 				<button class="page-btn" (click)="goToPage(1)" [disabled]="currentPage === 1">

@@ -25,3 +25,7 @@ Run `ng e2e` to execute the end-to-end tests via a platform of your choice. To u
 ## Further help
 
 To get more help on the Angular CLI use `ng help` or go check out the [Angular CLI Overview and Command Reference](https://angular.io/cli) page.
+
+
+//
+$port=8086; $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($conn) { $procId=$conn.OwningProcess; Write-Host "Stopping process $procId on port $port"; Stop-Process -Id $procId -Force } else { Write-Host "No listener found on port $port" }; Set-Location "C:\Users\ASUS\Desktop\spring\navire"; java -jar "target\navire-0.0.1-SNAPSHOT.jar"

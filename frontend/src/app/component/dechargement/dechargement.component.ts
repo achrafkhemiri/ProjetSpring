@@ -699,6 +699,10 @@ export class DechargementComponent implements OnInit {
         },
         error: (err) => {
           console.error('❌ Erreur chargement clients du projet:', err);
+          if (err.status === 403 || err.status === 401) {
+            console.error('🔒 Erreur d\'authentification - Token probablement expiré.');
+            console.error('   L\'intercepteur AuthErrorInterceptor va vous rediriger vers la page de login.');
+          }
           this.clients = [];
         }
       });

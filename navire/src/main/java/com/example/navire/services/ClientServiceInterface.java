@@ -1,6 +1,7 @@
 package com.example.navire.services;
 
 import com.example.navire.dto.ClientDTO;
+import com.example.navire.dto.ClientProjetDTO;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -14,4 +15,6 @@ public interface ClientServiceInterface {
     ClientDTO updateClient(Long id, ClientDTO dto);
     void deleteClient(Long id);
     Page<ClientDTO> searchClients(String search, Pageable pageable);
+
+    Page<ClientProjetDTO> searchClientsByProjet(Long projetId, String search, Pageable pageable);
 }

@@ -1,0 +1,62 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: navire-mysql
+    environment:
+      MYSQL_DATABASE: spring-projet
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      start_period: 60s
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: navire-phpmyadmin
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: root
+    ports:
+      - "8081:80"
+
+  backend:
+    build:
+      context: ./navire
+      dockerfile: Dockerfile
+    container_name: navire-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8086
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: spring-projet
+      DB_USER: root
+      DB_PASSWORD: root
+    ports:
+      - "8086:8086"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: navire-frontend
+    depends_on:
+      - backend
+    ports:
+      - "4200:4200"
+
+volumes:
+  mysql_data:

@@ -56,16 +56,12 @@ export class AuthErrorInterceptor implements HttpInterceptor {
             }
 
             // Otherwise treat as authentication/authorization problem
-            if (this.authService.isAuthenticated()) {
-              console.warn('🔒 Erreur 403 reçue alors que l\'utilisateur est authentifié. Token probablement expiré. Déconnexion automatique...');
-              this.handleTokenExpiration();
-            } else {
-              // Additional heuristic checks on the error message
-              if (errorMessage.includes('token') || errorMessage.includes('expired') || errorMessage.includes('jwt') || errorMessage.includes('unauthorized')) {
-                console.warn('🔒 Problème d\'authentification détecté (403). Déconnexion automatique...');
-                this.handleTokenExpiration();
-              }
-            }
+            // Don't check if user is authenticated - just handle the 403 as token expiration
+            console.warn('🔒 Erreur 403 reçue - Token probablement expiré ou invalide.');
+            console.warn('   📍 Request:', req.method, requestUrl);
+            console.warn('   💬 Message:', errorMessageRaw || 'Aucun message');
+            console.warn('   🚪 Déconnexion automatique...');
+            this.handleTokenExpiration();
           }
         }
         return throwError(() => error);

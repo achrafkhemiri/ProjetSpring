@@ -1,5 +1,6 @@
-import { Component, ChangeDetectorRef } from '@angular/core';
+import { Component, ChangeDetectorRef, OnInit } from '@angular/core';
 import { trigger, state, style, transition, animate } from '@angular/animations';
+import { ActivatedRoute, Router } from '@angular/router';
 import { ClientControllerService } from '../../api/api/clientController.service';
 import { ProjetClientControllerService } from '../../api/api/projetClientController.service';
 import { ProjetActifService } from '../../service/projet-actif.service';
@@ -45,7 +46,7 @@ import * as XLSX from 'xlsx';
     ])
   ]
 })
-export class ClientComponent {
+export class ClientComponent implements OnInit {
   clients: ClientDTO[] = [];
   filteredClients: ClientDTO[] = [];
   paginatedClients: ClientDTO[] = [];
@@ -100,7 +101,13 @@ export class ClientComponent {
   currentPage: number = 1;
   pageSize: number = 5;
   totalPages: number = 1;
+  totalElements: number = 0;
   pageSizes: number[] = [5, 10, 20, 50];
+
+  // Use backend pagination for project clients
+  backendPaging: boolean = true;
+
+  private syncingFromUrl: boolean = false;
   
   // Sorting
   sortColumn: string = '';
@@ -137,7 +144,9 @@ export class ClientComponent {
     private http: HttpClient,
     private dialog: MatDialog,
     @Inject(BASE_PATH) private basePath: string,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private route: ActivatedRoute,
+    private router: Router
   ) {
     // 🔥 Écouter les changements du projet actif
     this.projetActifService.projetActif$.subscribe(projet => {
@@ -171,6 +180,75 @@ export class ClientComponent {
     this.initializeProjetContext();
     // Initialiser la date du jour
     this.today = this.getTodayString();
+  }
+
+  ngOnInit(): void {
+    // Keep URL in sync: /client?page=2&size=10&search=...
+    this.route.queryParamMap.subscribe(params => {
+      this.syncingFromUrl = true;
+
+      const pageParam = Number(params.get('page') ?? '1');
+      const sizeParam = Number(params.get('size') ?? String(this.pageSize));
+      const searchParam = params.get('search') ?? '';
+
+      const dateFilterParam = params.get('dateFilter');
+      const dateDebutParam = params.get('dateDebut');
+      const dateFinParam = params.get('dateFin');
+
+      const nextPage = Number.isFinite(pageParam) && pageParam >= 1 ? pageParam : 1;
+      const nextSize = Number.isFinite(sizeParam) && sizeParam > 0 ? sizeParam : this.pageSize;
+
+      const changed =
+        nextPage !== this.currentPage ||
+        nextSize !== this.pageSize ||
+        searchParam !== (this.clientFilter ?? '') ||
+        (dateFilterParam === '1') !== this.dateFilterActive ||
+        (dateDebutParam ?? null) !== (this.dateDebut ?? null) ||
+        (dateFinParam ?? null) !== (this.dateFin ?? null);
+
+      this.currentPage = nextPage;
+      this.pageSize = nextSize;
+      this.clientFilter = searchParam;
+
+      this.dateFilterActive = dateFilterParam === '1';
+      this.dateDebut = this.dateFilterActive ? (dateDebutParam ?? null) : null;
+      this.dateFin = this.dateFilterActive ? (dateFinParam ?? null) : null;
+
+      this.syncingFromUrl = false;
+
+      // Only reload when query params changed (or initial empty load)
+      if (changed || (!this.clients || this.clients.length === 0)) {
+        this.loadClients();
+      }
+    });
+  }
+
+  private syncUrlWithState(): void {
+    if (this.syncingFromUrl) return;
+
+    const search = (this.clientFilter || '').trim();
+    const queryParams: any = {
+      page: this.currentPage,
+      size: this.pageSize,
+      search: search ? search : null,
+    };
+
+    if (this.dateFilterActive) {
+      queryParams.dateFilter = '1';
+      queryParams.dateDebut = this.dateDebut ? this.dateDebut : null;
+      queryParams.dateFin = this.dateFin ? this.dateFin : null;
+    } else {
+      queryParams.dateFilter = null;
+      queryParams.dateDebut = null;
+      queryParams.dateFin = null;
+    }
+
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   initializeProjetContext() {
@@ -727,114 +805,90 @@ export class ClientComponent {
     if (!targetProjetId) {
       console.warn('⚠️ Aucun projet actif - liste des clients vide');
       this.clients = [];
-      this.applyFilter();
+      this.filteredClients = [];
+      this.paginatedClients = [];
+      this.totalElements = 0;
+      this.totalPages = 1;
       return;
     }
-    
-    // Charger les ProjetClient pour ce projet via l'API
-    const url = `${this.basePath}/api/projet-client/projet/${targetProjetId}`;
-    console.log('📤 Appel endpoint projet-clients:', url);
-    
-    this.http.get<any[]>(url, { withCredentials: true, responseType: 'json' as 'json' }).subscribe({
-      next: (projetClients) => {
-        console.log('✅ Réponse getProjetClientsByProjetId:', projetClients);
-        
-        if (!Array.isArray(projetClients) || projetClients.length === 0) {
-          this.clients = [];
-          this.applyFilter();
-          return;
-        }
-        
-        // Récupérer les IDs uniques des clients
-        const clientIds = [...new Set(projetClients.map((pc: any) => pc.clientId))];
-        
-        // Charger tous les clients
-        this.http.get<any[]>(`${this.basePath}/api/clients`, { 
-          withCredentials: true, 
-          responseType: 'json' as 'json' 
-        }).subscribe({
-          next: (allClients) => {
-            // Filtrer et enrichir avec les infos de ProjetClient
-            this.clients = allClients
-                  .filter((client: any) => clientIds.includes(client.id))
-                  .map((client: any) => {
-                    const projetClient = projetClients.find((pc: any) => pc.clientId === client.id);
-                    // autorisation may be an array of {code, quantite} OR a JSON string (backend sometimes returns string)
-                    let autorisations: any = projetClient?.autorisation || [];
-                    // If autorisations is a JSON string, try to parse it into an array
-                    if (typeof autorisations === 'string' && autorisations.trim().length > 0) {
-                      try {
-                        const parsed = JSON.parse(autorisations);
-                        autorisations = Array.isArray(parsed) ? parsed : autorisations;
-                      } catch (e) {
-                        // leave as-is (fallback) — we'll treat non-array as empty below
-                        console.warn('Warn: unable to parse projetClient.autorisation JSON string', e);
-                      }
-                    }
 
-                    // Normalize autorisation entries to ensure { code, quantite }
-                    if (Array.isArray(autorisations)) {
-                      autorisations = autorisations.map((a: any) => ({
-                        code: (a && a.code) ? String(a.code) : 'DEFAULT',
-                        quantite: Number(a && a.quantite) || 0
-                      }));
-                    } else {
-                      // not an array: fall back to empty list so template will show totals
-                      autorisations = [];
-                    }
+    // Backend pagination + search (page is 0-based)
+    const url = `${this.basePath}/api/clients/projet/${targetProjetId}/paged`;
+    const params: any = {
+      page: String(Math.max(0, this.currentPage - 1)),
+      size: String(this.pageSize),
+    };
+    const search = (this.clientFilter || '').trim();
+    if (search) params.search = search;
 
-                    const sumAutorisation = autorisations.length > 0
-                      ? autorisations.reduce((s: number, a: any) => s + (a?.quantite || 0), 0)
-                      : (projetClient?.quantiteAutorisee || 0);
+    this.http.get<any>(url, { withCredentials: true, params }).subscribe({
+      next: (data: any) => {
+        const content = Array.isArray(data?.content) ? data.content : [];
+        this.totalElements = Number(data?.totalElements) || 0;
+        this.totalPages = Number(data?.totalPages) || 1;
 
-                    // also populate quantitesAutoriseesParProjet for compatibility with getQuantitePourProjet
-                    const quantitesMap: any = {};
-                    quantitesMap[targetProjetId] = sumAutorisation;
-
-                    return {
-                      ...client,
-                      projetClientId: projetClient?.id,
-                      autorisation: autorisations,
-                      quantiteAutorisee: sumAutorisation,
-                      quantitesAutoriseesParProjet: quantitesMap,
-                      projetId: targetProjetId
-                    };
-                  })
-              .sort((a: any, b: any) => (b.id || 0) - (a.id || 0));
-            
-            console.log(`✅ ${this.clients.length} clients enrichis pour le projet ${targetProjetId}`);
-            this.applyFilter();
-          },
-          error: (err: any) => {
-            console.error('❌ Erreur chargement détails clients:', err);
-            this.clients = [];
-            this.applyFilter();
+        // Normalize autorisations to ensure { code, quantite }[]
+        this.clients = content.map((row: any) => {
+          let autorisations: any = row?.autorisation || [];
+          if (typeof autorisations === 'string' && autorisations.trim().length > 0) {
+            try {
+              const parsed = JSON.parse(autorisations);
+              autorisations = Array.isArray(parsed) ? parsed : autorisations;
+            } catch (e) {
+              console.warn('Warn: unable to parse autorisation JSON string', e);
+            }
           }
+
+          if (Array.isArray(autorisations)) {
+            autorisations = autorisations.map((a: any) => ({
+              code: (a && a.code) ? String(a.code) : 'DEFAULT',
+              quantite: Number(a && a.quantite) || 0
+            }));
+          } else {
+            autorisations = [];
+          }
+
+          const sumAutorisation = autorisations.length > 0
+            ? autorisations.reduce((s: number, a: any) => s + (a?.quantite || 0), 0)
+            : (Number(row?.quantiteAutorisee) || 0);
+
+          const quantitesMap: any = row?.quantitesAutoriseesParProjet || {};
+          quantitesMap[targetProjetId] = sumAutorisation;
+
+          return {
+            ...row,
+            autorisation: autorisations,
+            quantiteAutorisee: sumAutorisation,
+            quantitesAutoriseesParProjet: quantitesMap,
+            projetId: targetProjetId
+          };
         });
+
+        this.filteredClients = this.clients;
+        this.paginatedClients = this.clients;
+
+        if (this.sortColumn) {
+          this.sortClients();
+        } else {
+          this.updatePagination();
+        }
       },
-      error: err => {
-        console.error('❌ Erreur chargement projet-clients:', err);
+      error: (err: any) => {
+        console.error('❌ Erreur chargement clients paginés:', err);
         this.error = 'Erreur chargement des clients: ' + (err.error?.message || err.message);
         this.clients = [];
-        this.applyFilter();
+        this.filteredClients = [];
+        this.paginatedClients = [];
+        this.totalElements = 0;
+        this.totalPages = 1;
       }
     });
   }
 
   applyFilter() {
-    const filter = this.clientFilter.trim().toLowerCase();
-    let clientsFiltrés = this.clients;
-    
-    // Filtre par texte uniquement (clients déjà filtrés par projet lors du chargement)
-    if (filter) {
-      clientsFiltrés = clientsFiltrés.filter(c =>
-        (c.nom?.toLowerCase().includes(filter) || false) ||
-        (c.numero?.toLowerCase().includes(filter) || false)
-      );
-    }
-    this.filteredClients = clientsFiltrés;
     this.currentPage = 1;
-    this.updatePagination();
+    this.syncUrlWithState();
+    this.loadClients();
   }
 
   // Sorting methods
@@ -883,6 +937,16 @@ export class ClientComponent {
 
   // Pagination methods
   updatePagination() {
+    if (this.backendPaging) {
+      // Server already paginates; keep arrays aligned with current page.
+      this.filteredClients = this.clients;
+      this.paginatedClients = this.clients;
+      if (!this.totalPages || this.totalPages < 1) this.totalPages = 1;
+      if (this.currentPage > this.totalPages) this.currentPage = this.totalPages;
+      if (this.currentPage < 1) this.currentPage = 1;
+      return;
+    }
+
     this.totalPages = Math.ceil(this.filteredClients.length / this.pageSize);
     if (this.currentPage > this.totalPages) {
       this.currentPage = this.totalPages || 1;
@@ -894,12 +958,22 @@ export class ClientComponent {
 
   onPageSizeChange() {
     this.currentPage = 1;
+    if (this.backendPaging) {
+      this.syncUrlWithState();
+      this.loadClients();
+      return;
+    }
     this.updatePagination();
   }
 
   goToPage(page: number) {
     if (page >= 1 && page <= this.totalPages) {
       this.currentPage = page;
+      if (this.backendPaging) {
+        this.syncUrlWithState();
+        this.loadClients();
+        return;
+      }
       this.updatePagination();
     }
   }
@@ -1271,6 +1345,11 @@ export class ClientComponent {
   // Activer/désactiver le filtre par date
   toggleDateFilter() {
     this.dateFilterActive = !this.dateFilterActive;
+    if (!this.dateFilterActive) {
+      this.dateDebut = null;
+      this.dateFin = null;
+    }
+    this.syncUrlWithState();
     this.updatePagination();
   }
   
@@ -1283,8 +1362,7 @@ export class ClientComponent {
     if (this.dateFin && this.today && this.dateFin > this.today) {
       this.dateFin = this.today;
     }
-    // Relancer le filtrage ou au moins la pagination
-    this.applyFilter();
+    // La plage de date impacte les calculs (vendu/reste), pas la liste des clients
     this.updatePagination();
   }
   
@@ -1293,6 +1371,7 @@ export class ClientComponent {
     this.dateFilterActive = false;
     this.dateDebut = null;
     this.dateFin = null;
+    this.syncUrlWithState();
     this.updatePagination();
   }
   

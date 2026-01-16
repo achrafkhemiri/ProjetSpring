@@ -1,8 +1,11 @@
 
 package com.example.navire.controller;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.example.navire.dto.ClientDTO;
+import com.example.navire.dto.ClientProjetDTO;
 import com.example.navire.services.ClientServiceInterface;
 import com.example.navire.exception.ClientNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +17,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/clients")
 public class ClientController {
+    private static final Logger log = LoggerFactory.getLogger(ClientController.class);
+
     @Autowired
     private ClientServiceInterface clientService;
 
@@ -27,7 +32,12 @@ public class ClientController {
         @RequestParam(value = "search", required = false, defaultValue = "") String search,
         Pageable pageable
     ) {
-        return clientService.searchClients(search != null ? search : "", pageable);
+        String safeSearch = (search == null) ? "" : search;
+        log.info("[ClientController] GET /api/clients/paged search='{}' pageable={} ", safeSearch, pageable);
+        Page<ClientDTO> page = clientService.searchClients(safeSearch, pageable);
+        log.info("[ClientController] /api/clients/paged -> totalElements={}, totalPages={}, contentSize={}",
+                page.getTotalElements(), page.getTotalPages(), page.getNumberOfElements());
+        return page;
     }
     
     @GetMapping("/{id}")
@@ -38,6 +48,20 @@ public class ClientController {
     @GetMapping("/projet/{projetId}")
     public List<ClientDTO> getClientsByProjet(@PathVariable Long projetId) {
         return clientService.getClientsByProjetId(projetId);
+    }
+
+    @GetMapping("/projet/{projetId}/paged")
+    public Page<ClientProjetDTO> getClientsByProjetPaged(
+        @PathVariable Long projetId,
+        @RequestParam(value = "search", required = false, defaultValue = "") String search,
+        Pageable pageable
+    ) {
+        String safeSearch = (search == null) ? "" : search;
+        log.info("[ClientController] GET /api/clients/projet/{}/paged search='{}' pageable={}", projetId, safeSearch, pageable);
+        Page<ClientProjetDTO> page = clientService.searchClientsByProjet(projetId, safeSearch, pageable);
+        log.info("[ClientController] /api/clients/projet/{}/paged -> totalElements={}, totalPages={}, contentSize={}",
+                projetId, page.getTotalElements(), page.getTotalPages(), page.getNumberOfElements());
+        return page;
     }
 
     @PostMapping
