@@ -1,9 +1,12 @@
 package com.example.navire.controller;
 
 import com.example.navire.dto.DepotDTO;
+import com.example.navire.dto.DepotProjetDTO;
 import com.example.navire.services.DepotService;
 import com.example.navire.exception.DepotNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.HttpStatus;
@@ -18,6 +21,29 @@ public class DepotController {
     @GetMapping
     public List<DepotDTO> getAllDepots() {
         return depotService.getAllDepots();
+    }
+
+    @GetMapping("/paged")
+    public Page<DepotDTO> getDepotsPaged(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String nom,
+            @RequestParam(required = false) String adresse,
+            @RequestParam(required = false) String mf,
+            Pageable pageable
+    ) {
+        return depotService.searchDepots(search, nom, adresse, mf, pageable);
+    }
+
+    @GetMapping("/projet/{projetId}/paged")
+    public Page<DepotProjetDTO> getDepotsByProjetPaged(
+            @PathVariable Long projetId,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String nom,
+            @RequestParam(required = false) String adresse,
+            @RequestParam(required = false) String mf,
+            Pageable pageable
+    ) {
+        return depotService.getDepotsByProjetPaged(projetId, search, nom, adresse, mf, pageable);
     }
 
     @GetMapping("/{id}")

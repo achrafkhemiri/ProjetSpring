@@ -1,0 +1,11 @@
+target/
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Maven wrapper artifacts (optional)
+.mvn/wrapper/*.jar
+
+# Logs
+*.log

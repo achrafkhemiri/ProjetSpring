@@ -1,10 +1,17 @@
 package com.example.navire.services;
 
+import com.example.navire.dto.DepotProjetDTO;
 import com.example.navire.dto.DepotDTO;
 import com.example.navire.exception.DepotNotFoundException;
+import com.example.navire.exception.ProjetNotFoundException;
 import com.example.navire.mapper.DepotMapper;
 import com.example.navire.model.Depot;
+import com.example.navire.model.ProjetDepot;
 import com.example.navire.repository.DepotRepository;
+import com.example.navire.repository.ProjetDepotRepository;
+import com.example.navire.repository.ProjetRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,11 +25,40 @@ public class DepotService {
     private DepotRepository depotRepository;
     @Autowired
     private DepotMapper depotMapper;
+    @Autowired
+    private ProjetDepotRepository projetDepotRepository;
+    @Autowired
+    private ProjetRepository projetRepository;
 
     public List<DepotDTO> getAllDepots() {
         return depotRepository.findAll().stream()
                 .map(depotMapper::toDTO)
                 .collect(Collectors.toList());
+    }
+
+    public Page<DepotDTO> searchDepots(String search, String nom, String adresse, String mf, Pageable pageable) {
+        return depotRepository.search(search, nom, adresse, mf, pageable)
+                .map(depotMapper::toDTO);
+    }
+
+    public Page<DepotProjetDTO> getDepotsByProjetPaged(Long projetId, String search, String nom, String adresse, String mf, Pageable pageable) {
+        if (projetId == null || !projetRepository.existsById(projetId)) {
+            throw new ProjetNotFoundException(projetId);
+        }
+
+        return projetDepotRepository.searchByProjetId(projetId, search, nom, adresse, mf, pageable)
+                .map(pd -> {
+                    Depot d = pd.getDepot();
+                    return DepotProjetDTO.builder()
+                            .id(d != null ? d.getId() : null)
+                            .nom(d != null ? d.getNom() : null)
+                            .adresse(d != null ? d.getAdresse() : null)
+                            .mf(d != null ? d.getMf() : null)
+                            .projetId(pd.getProjet() != null ? pd.getProjet().getId() : null)
+                            .projetDepotId(pd.getId())
+                            .quantiteAutorisee(pd.getQuantiteAutorisee())
+                            .build();
+                });
     }
 
     public DepotDTO getDepotById(Long id) {

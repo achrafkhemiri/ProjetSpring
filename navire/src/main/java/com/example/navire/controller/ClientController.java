@@ -3,6 +3,7 @@ package com.example.navire.controller;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.example.navire.dto.ClientDTO;
+import com.example.navire.dto.ClientProjetDTO;
 import com.example.navire.services.ClientServiceInterface;
 import com.example.navire.exception.ClientNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,9 +26,14 @@ public class ClientController {
     @GetMapping("/paged")
     public Page<ClientDTO> getClientsPaged(
         @RequestParam(value = "search", required = false, defaultValue = "") String search,
+        @RequestParam(value = "filter", required = false) String filter,
+        @RequestParam(value = "numero", required = false) String numero,
+        @RequestParam(value = "nom", required = false) String nom,
+        @RequestParam(value = "mf", required = false) String mf,
+        @RequestParam(value = "adresse", required = false) String adresse,
         Pageable pageable
     ) {
-        return clientService.searchClients(search != null ? search : "", pageable);
+        return clientService.searchClients(search != null ? search : "", filter, numero, nom, mf, adresse, pageable);
     }
     
     @GetMapping("/{id}")
@@ -38,6 +44,20 @@ public class ClientController {
     @GetMapping("/projet/{projetId}")
     public List<ClientDTO> getClientsByProjet(@PathVariable Long projetId) {
         return clientService.getClientsByProjetId(projetId);
+    }
+
+    @GetMapping("/projet/{projetId}/paged")
+    public Page<ClientProjetDTO> getClientsByProjetPaged(
+        @PathVariable Long projetId,
+        @RequestParam(value = "search", required = false, defaultValue = "") String search,
+        @RequestParam(value = "filter", required = false) String filter,
+        @RequestParam(value = "numero", required = false) String numero,
+        @RequestParam(value = "nom", required = false) String nom,
+        @RequestParam(value = "mf", required = false) String mf,
+        @RequestParam(value = "adresse", required = false) String adresse,
+        Pageable pageable
+    ) {
+        return clientService.getClientsByProjetPaged(projetId, search, filter, numero, nom, mf, adresse, pageable);
     }
 
     @PostMapping
