@@ -13,7 +13,7 @@
         </div>
         <div>
           <h1 class="page-title">Dépôts</h1>
-          <p class="page-subtitle">{{ filteredDepots.length }} dépôt(s) trouvé(s)</p>
+          <p class="page-subtitle">{{ totalElements }} dépôt(s) trouvé(s)</p>
         </div>
       </div>
       <div style="display: flex; gap: 12px;">
@@ -45,7 +45,7 @@
         />
       </div>
       <div class="toolbar-right">
-        <span class="results-count">{{ filteredDepots.length }} résultat(s)</span>
+        <span class="results-count">{{ totalElements }} résultat(s)</span>
         <div class="page-size-selector">
           <span>Afficher</span>
           <select [(ngModel)]="pageSize" (change)="onPageSizeChange()" class="page-size-select">
@@ -66,7 +66,7 @@
           style="flex: 1; min-width: 150px;">
           <i class="bi bi-list-ul"></i>
           <span>Tous les dépôts</span>
-          <span class="filter-badge">{{ filteredDepots.length }}</span>
+          <span class="filter-badge">{{ totalElements }}</span>
         </button>
         <button 
           class="filter-btn" 
@@ -265,9 +265,9 @@
     </div>
 
     <!-- Pagination -->
-    <div class="pagination-container" *ngIf="filteredDepots.length > 0">
+    <div class="pagination-container" *ngIf="totalElements > 0">
       <div class="pagination-info">
-        Affichage de {{ (currentPage - 1) * pageSize + 1 }} à {{ Math.min(currentPage * pageSize, filteredDepots.length) }} sur {{ filteredDepots.length }} dépôt(s)
+        Affichage de {{ (currentPage - 1) * pageSize + 1 }} à {{ Math.min(currentPage * pageSize, totalElements) }} sur {{ totalElements }} dépôt(s)
       </div>
       <div class="pagination-controls">
         <button class="page-btn" (click)="goToPage(1)" [disabled]="currentPage === 1">

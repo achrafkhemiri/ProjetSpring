@@ -11,11 +11,12 @@ import { VoyageDTO } from '../../api/model/voyageDTO';
 import { BreadcrumbItem } from '../breadcrumb/breadcrumb.component';
 import { NotificationService } from '../../service/notification.service';
 import { QuantiteService } from '../../service/quantite.service';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Inject } from '@angular/core';
 import { BASE_PATH } from '../../api/variables';
 import { MatDialog } from '@angular/material/dialog';
 import { ConfirmCodeDialogComponent } from '../../shared/confirm-code-dialog.component';
+import { ActivatedRoute, Router } from '@angular/router';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -63,6 +64,12 @@ export class ClientComponent {
   isSidebarOpen: boolean = true;
   showAddClient: boolean = false;
   clientFilter: string = '';
+
+  // Optional field filters driven by URL query params
+  filterNom: string = '';
+  filterNumero: string = '';
+  filterMf: string = '';
+  filterAdresse: string = '';
   dialogClient: ClientDTO = { nom: '', numero: '', adresse: '', mf: '' };
   
   // Pour l'autocomplétion type Select2
@@ -100,6 +107,7 @@ export class ClientComponent {
   currentPage: number = 1;
   pageSize: number = 5;
   totalPages: number = 1;
+  totalElements: number = 0;
   pageSizes: number[] = [5, 10, 20, 50];
   
   // Sorting
@@ -125,6 +133,45 @@ export class ClientComponent {
   // Expose Math to template
   Math = Math;
 
+  private lastClientQueryKey: string = '';
+  private lastDateQueryKey: string = '';
+
+  private clampDateFilterToToday() {
+    // Clamp future dates for consistent behavior and shareable URLs
+    if (this.dateDebut && this.today && this.dateDebut > this.today) {
+      this.dateDebut = this.today;
+    }
+    if (this.dateFin && this.today && this.dateFin > this.today) {
+      this.dateFin = this.today;
+    }
+  }
+
+  private refreshComputedValues() {
+    // Date filter only affects computed totals in template; avoid reloading clients.
+    this.filteredClients = this.clients;
+    this.paginatedClients = this.clients;
+    this.cdr.detectChanges();
+  }
+
+  private toBackendSort(sortColumn: string, dir: 'asc' | 'desc'): string | null {
+    const c = (sortColumn || '').trim();
+    if (!c) return null;
+
+    // Project-scoped paging endpoint is based on ProjetClient, so client fields must be prefixed.
+    switch (c) {
+      case 'nom':
+      case 'numero':
+      case 'adresse':
+      case 'mf':
+        return `client.${c},${dir}`;
+      case 'id':
+        return `client.id,${dir}`;
+      default:
+        // Derived columns (quantite, reste, quantiteVendue) are not sortable server-side.
+        return null;
+    }
+  }
+
   constructor(
     private clientService: ClientControllerService,
     private projetClientService: ProjetClientControllerService,
@@ -135,6 +182,8 @@ export class ClientComponent {
     private quantiteService: QuantiteService,
   private dechargementService: DechargementControllerService,
     private http: HttpClient,
+    private route: ActivatedRoute,
+    private router: Router,
     private dialog: MatDialog,
     @Inject(BASE_PATH) private basePath: string,
     private cdr: ChangeDetectorRef
@@ -171,6 +220,117 @@ export class ClientComponent {
     this.initializeProjetContext();
     // Initialiser la date du jour
     this.today = this.getTodayString();
+
+    // URL-driven pagination/search/sort for /client
+    this.route.queryParamMap.subscribe(params => {
+      const page = Number(params.get('page') || '1') || 1;
+      const sizeParam = params.get('size');
+      const size = Number(sizeParam || String(this.pageSize)) || this.pageSize;
+      const search = (params.get('search') ?? '').toString();
+      const filter = (params.get('filter') ?? '').toString();
+      const nom = (params.get('nom') ?? '').toString();
+      const numero = (params.get('numero') ?? '').toString();
+      const mf = (params.get('mf') ?? '').toString();
+      const adresse = (params.get('adresse') ?? '').toString();
+      const sort = (params.get('sort') ?? '').toString();
+      const dirRaw = (params.get('dir') ?? 'asc').toString().toLowerCase();
+      const dir: 'asc' | 'desc' = dirRaw === 'desc' ? 'desc' : 'asc';
+
+      // Date filter params (client-side only)
+      const dateDebutParam = params.get('dateDebut');
+      const dateFinParam = params.get('dateFin');
+      const dateActiveRaw = (params.get('dateActive') ?? '').toString().toLowerCase();
+      const dateActive = (dateActiveRaw === '1' || dateActiveRaw === 'true' || !!dateDebutParam || !!dateFinParam);
+
+      // Ensure URL always contains size for share/refresh consistency
+      if (!sizeParam) {
+        this.updateClientUrlQuery({ size, page: Math.max(1, page) });
+      }
+
+      const effectiveText = (search && search.trim().length > 0) ? search : filter;
+      const clientKey = `${page}|${size}|${effectiveText}|${nom}|${numero}|${mf}|${adresse}|${sort}|${dir}`;
+      const dateKey = `${dateActive ? '1' : '0'}|${dateDebutParam ?? ''}|${dateFinParam ?? ''}`;
+
+      if (dateKey !== this.lastDateQueryKey) {
+        this.lastDateQueryKey = dateKey;
+        this.dateFilterActive = dateActive;
+        this.dateDebut = dateDebutParam ? dateDebutParam.toString() : null;
+        this.dateFin = dateFinParam ? dateFinParam.toString() : null;
+        this.clampDateFilterToToday();
+        this.refreshComputedValues();
+      }
+
+      if (clientKey === this.lastClientQueryKey) return;
+      this.lastClientQueryKey = clientKey;
+
+      this.currentPage = Math.max(1, page);
+      this.pageSize = size;
+      this.clientFilter = effectiveText;
+      this.filterNom = nom;
+      this.filterNumero = numero;
+      this.filterMf = mf;
+      this.filterAdresse = adresse;
+      this.sortColumn = sort;
+      this.sortDirection = dir;
+
+      this.loadClients();
+    });
+  }
+
+  private updateClientUrlQuery(partial: { page?: number; size?: number; search?: string | null; filter?: string | null; nom?: string | null; numero?: string | null; mf?: string | null; adresse?: string | null; sort?: string | null; dir?: 'asc' | 'desc' | null; dateActive?: boolean | null; dateDebut?: string | null; dateFin?: string | null }) {
+    const queryParams: any = {};
+    if (partial.page !== undefined) queryParams.page = partial.page;
+    if (partial.size !== undefined) queryParams.size = partial.size;
+    if (partial.search !== undefined) {
+      const v = (partial.search ?? '').toString().trim();
+      queryParams.search = v.length > 0 ? v : null;
+    }
+    if (partial.filter !== undefined) {
+      const v = (partial.filter ?? '').toString().trim();
+      queryParams.filter = v.length > 0 ? v : null;
+    }
+    if (partial.nom !== undefined) {
+      const v = (partial.nom ?? '').toString().trim();
+      queryParams.nom = v.length > 0 ? v : null;
+    }
+    if (partial.numero !== undefined) {
+      const v = (partial.numero ?? '').toString().trim();
+      queryParams.numero = v.length > 0 ? v : null;
+    }
+    if (partial.mf !== undefined) {
+      const v = (partial.mf ?? '').toString().trim();
+      queryParams.mf = v.length > 0 ? v : null;
+    }
+    if (partial.adresse !== undefined) {
+      const v = (partial.adresse ?? '').toString().trim();
+      queryParams.adresse = v.length > 0 ? v : null;
+    }
+    if (partial.sort !== undefined) {
+      const v = (partial.sort ?? '').toString().trim();
+      queryParams.sort = v.length > 0 ? v : null;
+    }
+    if (partial.dir !== undefined) {
+      queryParams.dir = partial.dir ?? null;
+    }
+
+    if (partial.dateActive !== undefined) {
+      queryParams.dateActive = partial.dateActive ? '1' : null;
+    }
+    if (partial.dateDebut !== undefined) {
+      const v = (partial.dateDebut ?? '').toString().trim();
+      queryParams.dateDebut = v.length > 0 ? v : null;
+    }
+    if (partial.dateFin !== undefined) {
+      const v = (partial.dateFin ?? '').toString().trim();
+      queryParams.dateFin = v.length > 0 ? v : null;
+    }
+
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
   }
 
   initializeProjetContext() {
@@ -727,114 +887,88 @@ export class ClientComponent {
     if (!targetProjetId) {
       console.warn('⚠️ Aucun projet actif - liste des clients vide');
       this.clients = [];
-      this.applyFilter();
+      this.filteredClients = [];
+      this.paginatedClients = [];
+      this.totalPages = 1;
+      this.totalElements = 0;
       return;
     }
-    
-    // Charger les ProjetClient pour ce projet via l'API
-    const url = `${this.basePath}/api/projet-client/projet/${targetProjetId}`;
-    console.log('📤 Appel endpoint projet-clients:', url);
-    
-    this.http.get<any[]>(url, { withCredentials: true, responseType: 'json' as 'json' }).subscribe({
-      next: (projetClients) => {
-        console.log('✅ Réponse getProjetClientsByProjetId:', projetClients);
-        
-        if (!Array.isArray(projetClients) || projetClients.length === 0) {
-          this.clients = [];
-          this.applyFilter();
-          return;
-        }
-        
-        // Récupérer les IDs uniques des clients
-        const clientIds = [...new Set(projetClients.map((pc: any) => pc.clientId))];
-        
-        // Charger tous les clients
-        this.http.get<any[]>(`${this.basePath}/api/clients`, { 
-          withCredentials: true, 
-          responseType: 'json' as 'json' 
-        }).subscribe({
-          next: (allClients) => {
-            // Filtrer et enrichir avec les infos de ProjetClient
-            this.clients = allClients
-                  .filter((client: any) => clientIds.includes(client.id))
-                  .map((client: any) => {
-                    const projetClient = projetClients.find((pc: any) => pc.clientId === client.id);
-                    // autorisation may be an array of {code, quantite} OR a JSON string (backend sometimes returns string)
-                    let autorisations: any = projetClient?.autorisation || [];
-                    // If autorisations is a JSON string, try to parse it into an array
-                    if (typeof autorisations === 'string' && autorisations.trim().length > 0) {
-                      try {
-                        const parsed = JSON.parse(autorisations);
-                        autorisations = Array.isArray(parsed) ? parsed : autorisations;
-                      } catch (e) {
-                        // leave as-is (fallback) — we'll treat non-array as empty below
-                        console.warn('Warn: unable to parse projetClient.autorisation JSON string', e);
-                      }
-                    }
 
-                    // Normalize autorisation entries to ensure { code, quantite }
-                    if (Array.isArray(autorisations)) {
-                      autorisations = autorisations.map((a: any) => ({
-                        code: (a && a.code) ? String(a.code) : 'DEFAULT',
-                        quantite: Number(a && a.quantite) || 0
-                      }));
-                    } else {
-                      // not an array: fall back to empty list so template will show totals
-                      autorisations = [];
-                    }
+    // Server-side pagination/search/sort for clients of the active project
+    const url = `${this.basePath}/api/clients/projet/${targetProjetId}/paged`;
+    let params = new HttpParams()
+      .set('page', String(Math.max(0, (this.currentPage || 1) - 1)))
+      .set('size', String(this.pageSize || 10));
 
-                    const sumAutorisation = autorisations.length > 0
-                      ? autorisations.reduce((s: number, a: any) => s + (a?.quantite || 0), 0)
-                      : (projetClient?.quantiteAutorisee || 0);
+    const search = this.clientFilter?.trim();
+    if (search) {
+      params = params.set('search', search);
+    }
 
-                    // also populate quantitesAutoriseesParProjet for compatibility with getQuantitePourProjet
-                    const quantitesMap: any = {};
-                    quantitesMap[targetProjetId] = sumAutorisation;
+    if (this.filterNom?.trim()) params = params.set('nom', this.filterNom.trim());
+    if (this.filterNumero?.trim()) params = params.set('numero', this.filterNumero.trim());
+    if (this.filterMf?.trim()) params = params.set('mf', this.filterMf.trim());
+    if (this.filterAdresse?.trim()) params = params.set('adresse', this.filterAdresse.trim());
 
-                    return {
-                      ...client,
-                      projetClientId: projetClient?.id,
-                      autorisation: autorisations,
-                      quantiteAutorisee: sumAutorisation,
-                      quantitesAutoriseesParProjet: quantitesMap,
-                      projetId: targetProjetId
-                    };
-                  })
-              .sort((a: any, b: any) => (b.id || 0) - (a.id || 0));
-            
-            console.log(`✅ ${this.clients.length} clients enrichis pour le projet ${targetProjetId}`);
-            this.applyFilter();
-          },
-          error: (err: any) => {
-            console.error('❌ Erreur chargement détails clients:', err);
-            this.clients = [];
-            this.applyFilter();
+    const backendSort = this.toBackendSort(this.sortColumn, this.sortDirection);
+    if (backendSort) {
+      params = params.set('sort', backendSort);
+    }
+
+    this.http.get<any>(url, { withCredentials: true, params, responseType: 'json' as 'json' }).subscribe({
+      next: (pageResp: any) => {
+        const raw = Array.isArray(pageResp?.content) ? pageResp.content : [];
+        this.totalPages = Number(pageResp?.totalPages) || 1;
+        this.totalElements = Number(pageResp?.totalElements) || raw.length;
+        this.currentPage = (Number(pageResp?.number) || 0) + 1;
+
+        this.clients = raw.map((row: any) => {
+          let autorisations: any = row?.autorisation || [];
+          if (Array.isArray(autorisations)) {
+            autorisations = autorisations.map((a: any) => ({
+              code: (a && a.code) ? String(a.code) : 'DEFAULT',
+              quantite: Number(a && a.quantite) || 0
+            }));
+          } else {
+            autorisations = [];
           }
+
+          const sumAutorisation = (row?.quantiteAutorisee != null)
+            ? Number(row.quantiteAutorisee) || 0
+            : (autorisations.length > 0 ? autorisations.reduce((s: number, a: any) => s + (a?.quantite || 0), 0) : 0);
+
+          const quantitesMap: any = row?.quantitesAutoriseesParProjet || {};
+          if (quantitesMap && typeof quantitesMap === 'object') {
+            quantitesMap[targetProjetId] = sumAutorisation;
+          }
+
+          return {
+            ...row,
+            autorisation: autorisations,
+            quantiteAutorisee: sumAutorisation,
+            quantitesAutoriseesParProjet: quantitesMap,
+            projetId: targetProjetId
+          };
         });
+
+        this.filteredClients = this.clients;
+        this.paginatedClients = this.clients;
       },
-      error: err => {
-        console.error('❌ Erreur chargement projet-clients:', err);
+      error: (err: any) => {
+        console.error('❌ Erreur chargement clients paginés:', err);
         this.error = 'Erreur chargement des clients: ' + (err.error?.message || err.message);
         this.clients = [];
-        this.applyFilter();
+        this.filteredClients = [];
+        this.paginatedClients = [];
+        this.totalPages = 1;
+        this.totalElements = 0;
       }
     });
   }
 
   applyFilter() {
-    const filter = this.clientFilter.trim().toLowerCase();
-    let clientsFiltrés = this.clients;
-    
-    // Filtre par texte uniquement (clients déjà filtrés par projet lors du chargement)
-    if (filter) {
-      clientsFiltrés = clientsFiltrés.filter(c =>
-        (c.nom?.toLowerCase().includes(filter) || false) ||
-        (c.numero?.toLowerCase().includes(filter) || false)
-      );
-    }
-    this.filteredClients = clientsFiltrés;
-    this.currentPage = 1;
-    this.updatePagination();
+    // Drive search via URL so refresh/share keeps state
+    this.updateClientUrlQuery({ page: 1, size: this.pageSize, search: this.clientFilter });
   }
 
   // Sorting methods
@@ -845,62 +979,27 @@ export class ClientComponent {
       this.sortColumn = column;
       this.sortDirection = 'asc';
     }
-    this.sortClients();
+    this.updateClientUrlQuery({ page: 1, sort: this.sortColumn, dir: this.sortDirection });
   }
 
   sortClients() {
-    this.filteredClients.sort((a: any, b: any) => {
-      let aVal = a[this.sortColumn];
-      let bVal = b[this.sortColumn];
-      
-      if (this.sortColumn === 'quantite') {
-        aVal = this.getQuantitePourProjet(a) || 0;
-        bVal = this.getQuantitePourProjet(b) || 0;
-      }
-      
-      if (this.sortColumn === 'quantiteVendue') {
-        aVal = this.getTotalLivreClient(a.id);
-        bVal = this.getTotalLivreClient(b.id);
-      }
-      
-      if (this.sortColumn === 'reste') {
-        aVal = this.getResteClient(a);
-        bVal = this.getResteClient(b);
-      }
-      
-      if (aVal === undefined || aVal === null) aVal = '';
-      if (bVal === undefined || bVal === null) bVal = '';
-      
-      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
-      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
-      
-      if (aVal < bVal) return this.sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return this.sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-    this.updatePagination();
+    // Sorting is now done server-side via query params.
+    this.paginatedClients = this.filteredClients;
   }
 
   // Pagination methods
   updatePagination() {
-    this.totalPages = Math.ceil(this.filteredClients.length / this.pageSize);
-    if (this.currentPage > this.totalPages) {
-      this.currentPage = this.totalPages || 1;
-    }
-    const startIndex = (this.currentPage - 1) * this.pageSize;
-    const endIndex = startIndex + this.pageSize;
-    this.paginatedClients = this.filteredClients.slice(startIndex, endIndex);
+    // Pagination is now done server-side.
+    this.paginatedClients = this.filteredClients;
   }
 
   onPageSizeChange() {
-    this.currentPage = 1;
-    this.updatePagination();
+    this.updateClientUrlQuery({ page: 1, size: this.pageSize });
   }
 
   goToPage(page: number) {
     if (page >= 1 && page <= this.totalPages) {
-      this.currentPage = page;
-      this.updatePagination();
+      this.updateClientUrlQuery({ page });
     }
   }
 
@@ -1040,9 +1139,8 @@ export class ClientComponent {
           this.voyages = Array.isArray(data) ? data : [];
         }
         console.log(`✅ [Client] Voyages rechargés: ${this.voyages.length}`);
-        // Forcer la mise à jour de l'affichage
-        this.applyFilter();
-        this.cdr.detectChanges();
+        // Voyages affect computed totals; do not touch URL-driven client paging.
+        this.refreshComputedValues();
       },
       error: (err) => {
         console.error('Erreur chargement voyages:', err);
@@ -1076,9 +1174,8 @@ export class ClientComponent {
         // Filtrer par projet actif
         this.dechargements = all.filter(d => d.projetId === targetProjetId);
         console.log(`✅ ${this.dechargements.length} déchargements chargés pour le projet ${targetProjetId}`);
-        // Forcer la mise à jour de l'affichage
-        this.applyFilter();
-        this.cdr.detectChanges();
+        // Déchargements affect computed totals; do not touch URL-driven client paging.
+        this.refreshComputedValues();
       },
       error: (err) => {
         console.error('Erreur chargement déchargements:', err);
@@ -1271,21 +1368,34 @@ export class ClientComponent {
   // Activer/désactiver le filtre par date
   toggleDateFilter() {
     this.dateFilterActive = !this.dateFilterActive;
-    this.updatePagination();
+    if (this.dateFilterActive && !this.dateDebut && !this.dateFin) {
+      // Default to today for a predictable shareable URL
+      this.dateDebut = this.today;
+      this.dateFin = this.today;
+    }
+    this.clampDateFilterToToday();
+    this.updateClientUrlQuery({
+      dateActive: this.dateFilterActive,
+      dateDebut: this.dateFilterActive ? this.dateDebut : null,
+      dateFin: this.dateFilterActive ? this.dateFin : null,
+    });
+    this.refreshComputedValues();
   }
   
   // Gérer le changement de date
   onDateFilterChange() {
-    // Clamp future dates
-    if (this.dateDebut && this.today && this.dateDebut > this.today) {
-      this.dateDebut = this.today;
+    this.clampDateFilterToToday();
+    // If user sets dates, consider filter active
+    if (this.dateDebut || this.dateFin) {
+      this.dateFilterActive = true;
     }
-    if (this.dateFin && this.today && this.dateFin > this.today) {
-      this.dateFin = this.today;
-    }
-    // Relancer le filtrage ou au moins la pagination
-    this.applyFilter();
-    this.updatePagination();
+
+    this.updateClientUrlQuery({
+      dateActive: this.dateFilterActive,
+      dateDebut: this.dateFilterActive ? this.dateDebut : null,
+      dateFin: this.dateFilterActive ? this.dateFin : null,
+    });
+    this.refreshComputedValues();
   }
   
   // Effacer le filtre par date
@@ -1293,7 +1403,8 @@ export class ClientComponent {
     this.dateFilterActive = false;
     this.dateDebut = null;
     this.dateFin = null;
-    this.updatePagination();
+    this.updateClientUrlQuery({ dateActive: false, dateDebut: null, dateFin: null });
+    this.refreshComputedValues();
   }
   
   // Formater la date en français

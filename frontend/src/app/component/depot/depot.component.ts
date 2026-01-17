@@ -3,13 +3,14 @@ import { trigger, state, style, transition, animate } from '@angular/animations'
 import { DepotControllerService } from '../../api/api/depotController.service';
 import { ProjetDepotControllerService } from '../../api/api/projetDepotController.service';
 import { VoyageControllerService } from '../../api/api/voyageController.service';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Inject } from '@angular/core';
 import { BASE_PATH } from '../../api/variables';
 import { MatDialog } from '@angular/material/dialog';
 import { ConfirmCodeDialogComponent } from '../../shared/confirm-code-dialog.component';
 import { ProjetActifService } from '../../service/projet-actif.service';
 import { ProjetControllerService } from '../../api/api/projetController.service';
+import { ActivatedRoute, Router } from '@angular/router';
 import { DepotDTO } from '../../api/model/depotDTO';
 import { ProjetDepotDTO } from '../../api/model/projetDepotDTO';
 import { VoyageDTO } from '../../api/model/voyageDTO';
@@ -85,6 +86,7 @@ export class DepotComponent {
   // Pagination
   currentPage: number = 1;
   pageSize: number = 5;
+  totalElements: number = 0;
   totalPages: number = 1;
   pageSizes: number[] = [5, 10, 20, 50];
   
@@ -118,6 +120,87 @@ export class DepotComponent {
   
   Math = Math;
 
+  private lastDepotQueryKey: string = '';
+  private lastDateQueryKey: string = '';
+
+  private toBackendSort(sortColumn: string, dir: 'asc' | 'desc'): string | null {
+    const c = (sortColumn || '').trim();
+    if (!c) return null;
+
+    // Project-scoped paging endpoint is based on ProjetDepot, so depot fields must be prefixed.
+    switch (c) {
+      case 'nom':
+      case 'adresse':
+      case 'mf':
+        return `depot.${c},${dir}`;
+      case 'id':
+        return `depot.id,${dir}`;
+      default:
+        return null;
+    }
+  }
+
+  private clampDateFilterToToday() {
+    if (this.dateDebut && this.today && this.dateDebut > this.today) {
+      this.dateDebut = this.today;
+    }
+    if (this.dateFin && this.today && this.dateFin > this.today) {
+      this.dateFin = this.today;
+    }
+  }
+
+  private refreshComputedValues() {
+    // Date filter only affects computed totals in template; do not reload depots.
+    this.filteredDepots = this.depots;
+    this.paginatedDepots = this.depots;
+    this.cdr.detectChanges();
+  }
+
+  private updateDepotUrlQuery(partial: {
+    page?: number;
+    size?: number;
+    search?: string | null;
+    sort?: string | null;
+    dir?: 'asc' | 'desc' | null;
+    dateActive?: boolean | null;
+    dateDebut?: string | null;
+    dateFin?: string | null;
+  }) {
+    const queryParams: any = {};
+    if (partial.page !== undefined) queryParams.page = partial.page;
+    if (partial.size !== undefined) queryParams.size = partial.size;
+
+    if (partial.search !== undefined) {
+      const v = (partial.search ?? '').toString().trim();
+      queryParams.search = v.length > 0 ? v : null;
+    }
+    if (partial.sort !== undefined) {
+      const v = (partial.sort ?? '').toString().trim();
+      queryParams.sort = v.length > 0 ? v : null;
+    }
+    if (partial.dir !== undefined) {
+      queryParams.dir = partial.dir ?? null;
+    }
+    if (partial.dateActive !== undefined) {
+      queryParams.dateActive = partial.dateActive ? '1' : null;
+    }
+    if (partial.dateDebut !== undefined) {
+      const v = (partial.dateDebut ?? '').toString().trim();
+      queryParams.dateDebut = v.length > 0 ? v : null;
+    }
+    if (partial.dateFin !== undefined) {
+      const v = (partial.dateFin ?? '').toString().trim();
+      queryParams.dateFin = v.length > 0 ? v : null;
+    }
+
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
+  }
+
   constructor(
     private depotService: DepotControllerService,
     private projetDepotService: ProjetDepotControllerService,
@@ -127,6 +210,8 @@ export class DepotComponent {
     private notificationService: NotificationService,
     private quantiteService: QuantiteService,
     private http: HttpClient,
+    private route: ActivatedRoute,
+    private router: Router,
     private dialog: MatDialog,
     @Inject(BASE_PATH) private basePath: string,
     private cdr: ChangeDetectorRef
@@ -159,6 +244,49 @@ export class DepotComponent {
     this.initializeProjetContext();
     // Initialiser la date du jour
     this.today = this.getTodayString();
+
+    // URL-driven pagination/search/sort/date for /depot
+    this.route.queryParamMap.subscribe(params => {
+      const page = Number(params.get('page') || '1') || 1;
+      const sizeParam = params.get('size');
+      const size = Number(sizeParam || String(this.pageSize)) || this.pageSize;
+      const search = (params.get('search') ?? '').toString();
+      const sort = (params.get('sort') ?? '').toString();
+      const dirRaw = (params.get('dir') ?? 'asc').toString().toLowerCase();
+      const dir: 'asc' | 'desc' = dirRaw === 'desc' ? 'desc' : 'asc';
+
+      const dateDebutParam = params.get('dateDebut');
+      const dateFinParam = params.get('dateFin');
+      const dateActiveRaw = (params.get('dateActive') ?? '').toString().toLowerCase();
+      const dateActive = (dateActiveRaw === '1' || dateActiveRaw === 'true' || !!dateDebutParam || !!dateFinParam);
+
+      // Ensure URL always contains size for share/refresh consistency
+      if (!sizeParam) {
+        this.updateDepotUrlQuery({ size, page: Math.max(1, page) });
+      }
+
+      const dateKey = `${dateActive ? '1' : '0'}|${dateDebutParam ?? ''}|${dateFinParam ?? ''}`;
+      if (dateKey !== this.lastDateQueryKey) {
+        this.lastDateQueryKey = dateKey;
+        this.dateFilterActive = dateActive;
+        this.dateDebut = dateDebutParam ? dateDebutParam.toString() : null;
+        this.dateFin = dateFinParam ? dateFinParam.toString() : null;
+        this.clampDateFilterToToday();
+        this.refreshComputedValues();
+      }
+
+      const depotKey = `${page}|${size}|${search.trim()}|${sort}|${dir}`;
+      if (depotKey === this.lastDepotQueryKey) return;
+      this.lastDepotQueryKey = depotKey;
+
+      this.currentPage = Math.max(1, page);
+      this.pageSize = size;
+      this.depotFilter = search;
+      this.sortColumn = sort;
+      this.sortDirection = dir;
+
+      this.loadDepots();
+    });
   }
 
   initializeProjetContext() {
@@ -173,7 +301,7 @@ export class DepotComponent {
       this.loadProjetDetails(this.contextProjetId, true);
     }
     this.loadAllDepots(); // Charger tous les dépôts pour l'autocomplétion
-    this.loadDepots();
+    this.loadProjetDepotsMeta();
     this.loadVoyages(); // Charger les voyages pour calculer la quantité vendue
   }
 
@@ -193,65 +321,46 @@ export class DepotComponent {
     
     // Recharger toutes les données
     this.loadAllDepots();
-    
-    // Charger les dépôts puis les voyages (pour avoir les données fraîches)
-    this.loadDepotsAndVoyages();
+
+    // Recharger la méta (pour autocomplétion) + liste paginée + voyages
+    this.loadProjetDepotsMeta();
+    this.loadDepots();
+    this.loadVoyages();
     
     this.updateBreadcrumb();
   }
   
   // Nouvelle méthode pour charger dépôts puis voyages de manière séquentielle
   private loadDepotsAndVoyages() {
+    // Kept for backward compatibility; new flow is URL-driven paging.
+    this.loadDepots();
+    this.loadVoyages();
+  }
+
+  // Meta list for current project (used to exclude already-associated depots in autocompletion)
+  private loadProjetDepotsMeta() {
     const targetProjetId = this.contextProjetId || this.projetActifId;
-    
     if (!targetProjetId) {
-      console.warn('⚠️ Aucun projet actif - liste des dépôts vide');
-      this.depots = [];
       this.projetDepots = [];
-      this.voyages = [];
-      this.applyFilter();
       return;
     }
-    
-    // Charger les ProjetDepot pour ce projet
+
     this.projetDepotService.getProjetDepotsByProjetId(targetProjetId, 'body').subscribe({
       next: async (data: any) => {
         if (data instanceof Blob) {
           const text = await data.text();
           try {
             const parsed = JSON.parse(text);
-            if (Array.isArray(parsed)) {
-              this.projetDepots = parsed.sort((a, b) => (b.id || 0) - (a.id || 0));
-              await this.loadDepotsDetailsAsync();
-              // Charger les voyages APRÈS les dépôts
-              this.loadVoyages();
-            }
+            this.projetDepots = Array.isArray(parsed) ? parsed : [];
           } catch (e) {
-            console.error('Erreur parsing projetDepots:', e);
             this.projetDepots = [];
-            this.depots = [];
-            this.voyages = [];
-            this.applyFilter();
           }
-        } else if (Array.isArray(data)) {
-          this.projetDepots = data.sort((a, b) => (b.id || 0) - (a.id || 0));
-          await this.loadDepotsDetailsAsync();
-          // Charger les voyages APRÈS les dépôts
-          this.loadVoyages();
         } else {
-          this.projetDepots = [];
-          this.depots = [];
-          this.voyages = [];
-          this.applyFilter();
+          this.projetDepots = Array.isArray(data) ? data : [];
         }
       },
-      error: err => {
-        console.error('❌ Erreur chargement projetDepots:', err);
-        this.error = 'Erreur chargement des dépôts: ' + (err.error?.message || err.message);
+      error: () => {
         this.projetDepots = [];
-        this.depots = [];
-        this.voyages = [];
-        this.applyFilter();
       }
     });
   }
@@ -261,7 +370,10 @@ export class DepotComponent {
     return new Promise((resolve) => {
       if (this.projetDepots.length === 0) {
         this.depots = [];
-        this.applyFilter();
+        this.filteredDepots = [];
+        this.paginatedDepots = [];
+        this.totalPages = 1;
+        this.totalElements = 0;
         resolve();
         return;
       }
@@ -297,13 +409,17 @@ export class DepotComponent {
             .sort((a, b) => (b.id || 0) - (a.id || 0));
           
           console.log('✅ [Depot] Dépôts rechargés:', this.depots.length);
-          this.applyFilter();
+          this.filteredDepots = this.depots;
+          this.paginatedDepots = this.depots;
           resolve();
         },
         error: (err: any) => {
           console.error('❌ Erreur chargement détails dépôts:', err);
           this.depots = [];
-          this.applyFilter();
+          this.filteredDepots = [];
+          this.paginatedDepots = [];
+          this.totalPages = 1;
+          this.totalElements = 0;
           resolve();
         }
       });
@@ -426,7 +542,7 @@ export class DepotComponent {
     this.filteredSuggestions = this.allDepots.filter(depot => {
       const matchesSearch = depot.nom?.toLowerCase().includes(searchLower);
       // Exclure les dépôts déjà associés au projet actuel
-      const notInCurrentProject = !this.depots.some(d => d.id === depot.id);
+      const notInCurrentProject = !this.projetDepots.some(pd => pd.depotId === depot.id);
       return matchesSearch && notInCurrentProject;
     }).slice(0, 10); // Limiter à 10 suggestions
     
@@ -672,22 +788,8 @@ export class DepotComponent {
   }
 
   applyFilter() {
-    const filter = this.depotFilter.trim().toLowerCase();
-    let depotsFiltrés = this.depots;
-    
-    // Note: Les dépôts sont déjà filtrés par projet dans loadDepotsDetails()
-    // Pas besoin de refiltrer par projetId ici
-    
-    // Filtre par texte
-    if (filter) {
-      depotsFiltrés = depotsFiltrés.filter(d =>
-        d.nom?.toLowerCase().includes(filter)
-      );
-    }
-    
-    this.filteredDepots = depotsFiltrés;
-    // console.log(`📊 applyFilter() - ${this.filteredDepots.length} dépôts après filtrage`);
-    this.updatePagination();
+    // Drive search via URL so refresh/share keeps state
+    this.updateDepotUrlQuery({ page: 1, size: this.pageSize, search: this.depotFilter });
   }
 
   // Total livré pour un dépôt avec filtre par plage de dates (journée de travail 7h00 → 6h00)
@@ -723,25 +825,38 @@ export class DepotComponent {
 
   toggleDateFilter() {
     this.dateFilterActive = !this.dateFilterActive;
-    this.updatePagination();
+    if (this.dateFilterActive && !this.dateDebut && !this.dateFin) {
+      this.dateDebut = this.today;
+      this.dateFin = this.today;
+    }
+    this.clampDateFilterToToday();
+    this.updateDepotUrlQuery({
+      dateActive: this.dateFilterActive,
+      dateDebut: this.dateFilterActive ? this.dateDebut : null,
+      dateFin: this.dateFilterActive ? this.dateFin : null,
+    });
+    this.refreshComputedValues();
   }
 
   onDateFilterChange() {
-    // Empêcher la sélection d'une date future
-    if (this.dateDebut && this.today && this.dateDebut > this.today) {
-      this.dateDebut = this.today;
+    this.clampDateFilterToToday();
+    if (this.dateDebut || this.dateFin) {
+      this.dateFilterActive = true;
     }
-    if (this.dateFin && this.today && this.dateFin > this.today) {
-      this.dateFin = this.today;
-    }
-    this.updatePagination();
+    this.updateDepotUrlQuery({
+      dateActive: this.dateFilterActive,
+      dateDebut: this.dateFilterActive ? this.dateDebut : null,
+      dateFin: this.dateFilterActive ? this.dateFin : null,
+    });
+    this.refreshComputedValues();
   }
 
   clearDateFilter() {
     this.dateFilterActive = false;
     this.dateDebut = null;
     this.dateFin = null;
-    this.updatePagination();
+    this.updateDepotUrlQuery({ dateActive: false, dateDebut: null, dateFin: null });
+    this.refreshComputedValues();
   }
   
   
@@ -752,51 +867,22 @@ export class DepotComponent {
       this.sortColumn = column;
       this.sortDirection = 'asc';
     }
-    this.sortDepots();
+    this.updateDepotUrlQuery({ page: 1, sort: this.sortColumn, dir: this.sortDirection });
   }
   
   sortDepots() {
-    if (!this.sortColumn) {
-      this.updatePagination();
-      return;
-    }
-    
-    this.filteredDepots.sort((a, b) => {
-      let aVal: any = a[this.sortColumn as keyof DepotDTO];
-      let bVal: any = b[this.sortColumn as keyof DepotDTO];
-      
-      if (aVal === null || aVal === undefined) aVal = '';
-      if (bVal === null || bVal === undefined) bVal = '';
-      
-      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
-      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
-      
-      if (aVal < bVal) return this.sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return this.sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-    
-    this.updatePagination();
+    // Sorting is now done server-side via query params.
+    this.paginatedDepots = this.filteredDepots;
   }
   
   updatePagination() {
-    this.totalPages = Math.ceil(this.filteredDepots.length / this.pageSize);
-    if (this.currentPage > this.totalPages && this.totalPages > 0) {
-      this.currentPage = this.totalPages;
-    }
-    if (this.currentPage < 1) {
-      this.currentPage = 1;
-    }
-    
-    const startIndex = (this.currentPage - 1) * this.pageSize;
-    const endIndex = startIndex + this.pageSize;
-    this.paginatedDepots = this.filteredDepots.slice(startIndex, endIndex);
+    // Pagination is now done server-side.
+    this.paginatedDepots = this.filteredDepots;
   }
   
   goToPage(page: number) {
     if (page >= 1 && page <= this.totalPages) {
-      this.currentPage = page;
-      this.updatePagination();
+      this.updateDepotUrlQuery({ page });
     }
   }
   
@@ -817,8 +903,7 @@ export class DepotComponent {
   }
   
   onPageSizeChange() {
-    this.currentPage = 1;
-    this.updatePagination();
+    this.updateDepotUrlQuery({ page: 1, size: this.pageSize });
   }
 
   deleteDepot(id?: number) {
@@ -926,53 +1011,58 @@ export class DepotComponent {
 
   loadDepots() {
     const targetProjetId = this.contextProjetId || this.projetActifId;
-    // console.log('📊 loadDepots() - contextProjetId:', this.contextProjetId, 'projetActifId:', this.projetActifId, 'targetProjetId:', targetProjetId);
+    // console.log('📊 [Depot] loadDepots() - targetProjetId:', targetProjetId);
     
     if (!targetProjetId) {
       console.warn('⚠️ Aucun projet actif - liste des dépôts vide');
       this.depots = [];
-      this.projetDepots = [];
-      this.applyFilter();
+      this.filteredDepots = [];
+      this.paginatedDepots = [];
+      this.totalPages = 1;
+      this.totalElements = 0;
       return;
     }
-    
-    // Charger les ProjetDepot pour ce projet
-    this.projetDepotService.getProjetDepotsByProjetId(targetProjetId, 'body').subscribe({
-      next: async (data: any) => {
-        // console.log('✅ Réponse getProjetDepotsByProjetId:', data);
-        
-        if (data instanceof Blob) {
-          const text = await data.text();
-          try {
-            const parsed = JSON.parse(text);
-            if (Array.isArray(parsed)) {
-              this.projetDepots = parsed.sort((a, b) => (b.id || 0) - (a.id || 0));
-              // Charger les détails des dépôts
-              this.loadDepotsDetails();
-            }
-          } catch (e) {
-            console.error('Erreur parsing projetDepots:', e);
-            this.projetDepots = [];
-            this.depots = [];
-            this.applyFilter();
-          }
-        } else if (Array.isArray(data)) {
-          this.projetDepots = data.sort((a, b) => (b.id || 0) - (a.id || 0));
-          // console.log(`✅ ${data.length} ProjetDepots chargés pour le projet ${targetProjetId}`);
-          // Charger les détails des dépôts
-          this.loadDepotsDetails();
-        } else {
-          this.projetDepots = [];
-          this.depots = [];
-          this.applyFilter();
-        }
+
+    const url = `${this.basePath}/api/depots/projet/${targetProjetId}/paged`;
+    let params = new HttpParams()
+      .set('page', String(Math.max(0, this.currentPage - 1)))
+      .set('size', String(this.pageSize));
+
+    const s = (this.depotFilter || '').trim();
+    if (s.length > 0) params = params.set('search', s);
+
+    const backendSort = this.toBackendSort(this.sortColumn, this.sortDirection);
+    if (backendSort) {
+      params = params.set('sort', backendSort);
+    }
+
+    this.http.get<any>(url, { withCredentials: true, params, responseType: 'json' as 'json' }).subscribe({
+      next: (pageResp: any) => {
+        const raw = Array.isArray(pageResp?.content) ? pageResp.content : [];
+        this.totalPages = Number(pageResp?.totalPages) || 1;
+        this.totalElements = Number(pageResp?.totalElements) || raw.length;
+        this.currentPage = (Number(pageResp?.number) || 0) + 1;
+
+        this.depots = raw.map((row: any) => ({
+          id: row?.id,
+          nom: row?.nom,
+          adresse: row?.adresse,
+          mf: row?.mf,
+          projetDepotId: row?.projetDepotId,
+          quantiteAutorisee: Number(row?.quantiteAutorisee) || 0,
+        })) as DepotWithQuantite[];
+
+        this.filteredDepots = this.depots;
+        this.paginatedDepots = this.depots;
       },
-      error: err => {
-        console.error('❌ Erreur chargement projetDepots:', err);
+      error: (err: any) => {
+        console.error('❌ Erreur chargement dépôts paginés:', err);
         this.error = 'Erreur chargement des dépôts: ' + (err.error?.message || err.message);
-        this.projetDepots = [];
         this.depots = [];
-        this.applyFilter();
+        this.filteredDepots = [];
+        this.paginatedDepots = [];
+        this.totalPages = 1;
+        this.totalElements = 0;
       }
     });
   }
@@ -981,7 +1071,10 @@ export class DepotComponent {
   loadDepotsDetails() {
     if (this.projetDepots.length === 0) {
       this.depots = [];
-      this.applyFilter();
+      this.filteredDepots = [];
+      this.paginatedDepots = [];
+      this.totalPages = 1;
+      this.totalElements = 0;
       return;
     }
 
@@ -1019,12 +1112,16 @@ export class DepotComponent {
           .sort((a, b) => (b.id || 0) - (a.id || 0));
         
         // console.log('✅ Dépôts enrichis avec quantités:', this.depots);
-        this.applyFilter();
+        this.filteredDepots = this.depots;
+        this.paginatedDepots = this.depots;
       },
       error: (err: any) => {
         console.error('❌ Erreur chargement détails dépôts:', err);
         this.depots = [];
-        this.applyFilter();
+        this.filteredDepots = [];
+        this.paginatedDepots = [];
+        this.totalPages = 1;
+        this.totalElements = 0;
       }
     });
   }
@@ -1050,10 +1147,8 @@ export class DepotComponent {
             this.voyages = Array.isArray(data) ? data : [];
           }
           console.log('✅ [Depot] Voyages rechargés:', this.voyages.length);
-          // Réappliquer le filtre pour recalculer les quantités
-          this.applyFilter();
-          // Forcer la détection de changements
-          this.cdr.detectChanges();
+          // Voyages affect computed totals; do not touch URL-driven depot paging.
+          this.refreshComputedValues();
         },
         error: (err: any) => {
           console.error('Erreur chargement voyages:', err);
@@ -1077,10 +1172,8 @@ export class DepotComponent {
             this.voyages = Array.isArray(data) ? data : [];
           }
           console.log('✅ [Depot] Voyages rechargés:', this.voyages.length);
-          // Réappliquer le filtre pour recalculer les quantités
-          this.applyFilter();
-          // Forcer la détection de changements
-          this.cdr.detectChanges();
+          // Voyages affect computed totals; do not touch URL-driven depot paging.
+          this.refreshComputedValues();
         },
         error: (err: any) => {
           console.error('Erreur chargement voyages:', err);
@@ -1093,10 +1186,8 @@ export class DepotComponent {
   // Calculer la quantité livrée pour un dépôt
   getQuantiteLivree(depot: DepotWithQuantite): number {
     if (!depot.id) return 0;
-    const voyagesDepot = this.voyages.filter(v => v.depotId === depot.id);
-    const total = voyagesDepot.reduce((sum, v) => sum + (v.poidsDepot || 0), 0);
-    
-    return total;
+    // Respect date filter (work-day window) when active
+    return this.getTotalLivreDepot(depot.id);
   }
 
   // Calculer le reste pour un dépôt

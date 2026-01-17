@@ -145,7 +145,7 @@
 				/>
 			</div>
 			<div class="toolbar-right">
-				<span class="results-count">{{ filteredClients.length }} résultat(s)</span>
+				<span class="results-count">{{ totalElements || filteredClients.length }} résultat(s)</span>
 				<div class="page-size-selector">
 					<label>Afficher</label>
 					<select [(ngModel)]="pageSize" (change)="onPageSizeChange()" class="page-size-select">
